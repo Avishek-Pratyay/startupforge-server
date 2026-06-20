@@ -4,6 +4,8 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
+const Stripe = require("stripe");
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const { ObjectId } = require("mongodb");
 
 const client = require("./config/db");
@@ -37,6 +39,7 @@ async function run() {
     const opportunitiesCollection = db.collection("opportunities");
     const applicationsCollection = db.collection("applications");
 
+    const paymentsCollection = db.collection("payments");
     // ==================================================
     // USERS
     // ==================================================
@@ -77,6 +80,31 @@ async function run() {
       res.send(result);
     });
 
+
+
+    // UPDATE PROFILE
+app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
+  const email = req.params.email;
+
+  const updatedProfile = req.body;
+
+  const result = await usersCollection.updateOne(
+    {
+      email: email,
+    },
+    {
+      $set: {
+        name: updatedProfile.name,
+        image: updatedProfile.image,
+        skills: updatedProfile.skills,
+        bio: updatedProfile.bio,
+      },
+    }
+  );
+
+  res.send(result);
+});
+
     // ==================================================
     // JWT AUTH
     // ==================================================
@@ -86,6 +114,11 @@ async function run() {
 
       const user = await usersCollection.findOne({ email });
 
+      if (user.isBlocked) {
+  return res.status(403).send({
+    message: "User is blocked by admin",
+  });
+}
       if (!user) {
         return res.status(404).send({
           message: "User not found",
@@ -184,25 +217,55 @@ async function run() {
     // ==================================================
     // OPPORTUNITIES
     // ==================================================
+app.post("/opportunities", verifyJWT, async (req, res) => {
+  try {
+    if (req.decoded.role !== "founder") {
+      return res.status(403).send({
+        message: "Only founders can create opportunities",
+      });
+    }
 
-    app.post("/opportunities", verifyJWT, async (req, res) => {
-      if (req.decoded.role !== "founder") {
-        return res.status(403).send({
-          message: "Only founders can create opportunities",
-        });
-      }
+    const founder = await usersCollection.findOne({
+      email: req.decoded.email,
+    });
 
-      const opportunity = req.body;
+    const totalOpportunities =
+      await opportunitiesCollection.countDocuments({
+        founderEmail: req.decoded.email,
+      });
 
-      const result = await opportunitiesCollection.insertOne({
+    const isPremiumFounder =
+      founder?.isPremiumFounder || false;
+
+    if (
+      totalOpportunities >= 3 &&
+      !isPremiumFounder
+    ) {
+      return res.status(403).send({
+        premiumRequired: true,
+        message:
+          "Premium package required to create more than 3 opportunities",
+      });
+    }
+
+    const opportunity = req.body;
+
+    const result =
+      await opportunitiesCollection.insertOne({
         ...opportunity,
         founderEmail: req.decoded.email,
         createdAt: new Date(),
       });
 
-      res.send(result);
-    });
+    res.send(result);
+  } catch (error) {
+    console.log(error);
 
+    res.status(500).send({
+      message: "Failed to create opportunity",
+    });
+  }
+});
     app.get("/opportunities", async (req, res) => {
       const {
         search = "",
@@ -375,8 +438,313 @@ async function run() {
 
       res.send(result);
     });
+ 
 
     // ==================================================
+// STRIPE PAYMENT
+// ==================================================
+
+app.post(
+  "/create-checkout-session",
+  verifyJWT,
+  async (req, res) => {
+    try {
+      const { amount } = req.body;
+
+      const session =
+        await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+
+                product_data: {
+                  name: "StartupForge Premium Founder",
+                },
+
+                unit_amount: amount * 100,
+              },
+
+              quantity: 1,
+            },
+          ],
+
+          mode: "payment",
+
+          success_url:
+            `${process.env.CLIENT_URL}/payment-success`,
+
+          cancel_url:
+            `${process.env.CLIENT_URL}/dashboard`,
+        });
+
+      res.send({
+        url: session.url,
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500).send({
+        message: "Stripe session failed",
+      });
+    }
+  }
+);
+
+
+app.post(
+  "/payments",
+  verifyJWT,
+  async (req, res) => {
+    const payment = req.body;
+
+    const result =
+      await paymentsCollection.insertOne({
+        ...payment,
+        paid_at: new Date(),
+      });
+
+    await usersCollection.updateOne(
+      {
+        email: payment.user_email,
+      },
+      {
+        $set: {
+          isPremiumFounder: true,
+        },
+      }
+    );
+
+    res.send(result);
+  }
+);
+app.get(
+  "/payments",
+  verifyJWT,
+  async (req, res) => {
+    const result =
+      await paymentsCollection
+        .find()
+        .sort({ paid_at: -1 })
+        .toArray();
+
+    res.send(result);
+  }
+);
+
+
+// ==================================================
+// ADMIN REVENUE STATS
+// ==================================================
+
+app.get(
+  "/admin-overview",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const totalUsers =
+      await usersCollection.countDocuments();
+
+    const totalStartups =
+      await startupsCollection.countDocuments();
+
+    const totalOpportunities =
+      await opportunitiesCollection.countDocuments();
+
+    const payments =
+      await paymentsCollection.find().toArray();
+
+    const totalRevenue =
+      payments.reduce(
+        (sum, payment) =>
+          sum + Number(payment.amount || 0),
+        0
+      );
+
+    res.send({
+      totalUsers,
+      totalStartups,
+      totalOpportunities,
+      totalRevenue,
+    });
+  }
+);
+// ==================================================
+// TRANSACTIONS
+// ==================================================
+
+app.get(
+  "/transactions",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result =
+      await paymentsCollection
+        .find()
+        .sort({
+          paid_at: -1,
+        })
+        .toArray();
+
+    res.send(result);
+  }
+);
+
+
+
+
+// ==================================================
+// FOUNDER OVERVIEW
+// ==================================================
+
+app.get(
+  "/founder-overview/:email",
+  verifyJWT,
+  async (req, res) => {
+    const email = req.params.email;
+
+    const totalOpportunities =
+      await opportunitiesCollection.countDocuments({
+        founderEmail: email,
+      });
+
+    const founderOpportunities =
+      await opportunitiesCollection
+        .find({
+          founderEmail: email,
+        })
+        .toArray();
+
+    const opportunityIds =
+      founderOpportunities.map(
+        (item) => item._id.toString()
+      );
+
+    const applications =
+      await applicationsCollection
+        .find({
+          opportunity_id: {
+            $in: opportunityIds,
+          },
+        })
+        .toArray();
+
+    const totalApplications =
+      applications.length;
+
+    const acceptedMembers =
+      applications.filter(
+        (item) =>
+          item.status === "Accepted"
+      ).length;
+
+    res.send({
+      totalOpportunities,
+      totalApplications,
+      acceptedMembers,
+    });
+  }
+);
+
+app.get(
+  "/admin/users",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await usersCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(result);
+  }
+);
+app.patch(
+  "/admin/users/block/:id",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await usersCollection.updateOne(
+      {
+        _id: new ObjectId(req.params.id),
+      },
+      {
+        $set: {
+          isBlocked: true,
+        },
+      }
+    );
+
+    res.send(result);
+  }
+);
+app.patch(
+  "/admin/users/unblock/:id",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await usersCollection.updateOne(
+      {
+        _id: new ObjectId(req.params.id),
+      },
+      {
+        $set: {
+          isBlocked: false,
+        },
+      }
+    );
+
+    res.send(result);
+  }
+);
+app.get(
+  "/admin/startups",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await startupsCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(result);
+  }
+);
+app.patch(
+  "/admin/startups/approve/:id",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await startupsCollection.updateOne(
+      {
+        _id: new ObjectId(req.params.id),
+      },
+      {
+        $set: {
+          status: "Approved",
+        },
+      }
+    );
+
+    res.send(result);
+  }
+);
+app.delete(
+  "/admin/startups/:id",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result =
+      await startupsCollection.deleteOne({
+        _id: new ObjectId(req.params.id),
+      });
+
+    res.send(result);
+  }
+);
+// ====
+    // ==============================================
     // ADMIN
     // ==================================================
 

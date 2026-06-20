@@ -1,23 +1,27 @@
 const client = require("../config/db");
 
 const verifyAdmin = async (req, res, next) => {
-  const db = client.db("startupforge");
+  try {
+    const db = client.db("startupforge");
 
-  const usersCollection = db.collection("users");
+    const usersCollection = db.collection("users");
 
-  const email = req.decoded.email;
+    const user = await usersCollection.findOne({
+      email: req.decoded.email,
+    });
 
-  const user = await usersCollection.findOne({
-    email,
-  });
+    if (!user || user.role !== "admin") {
+      return res.status(403).send({
+        message: "Forbidden Access",
+      });
+    }
 
-  if (!user || user.role !== "admin") {
-    return res.status(403).send({
-      message: "Forbidden Access",
+    next();
+  } catch (error) {
+    res.status(500).send({
+      message: "Admin verification failed",
     });
   }
-
-  next();
 };
 
 module.exports = verifyAdmin;
