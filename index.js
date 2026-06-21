@@ -81,6 +81,23 @@ async function run() {
     });
 
 
+// UPDATE USER ROLE
+app.patch("/users/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const result = await usersCollection.updateOne(
+      { email },
+      { $set: req.body }
+    );
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      message: "Failed to update user",
+    });
+  }
+});
 
     // UPDATE PROFILE
 app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
