@@ -175,6 +175,19 @@ app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
     });
 
     // ==================================================
+    app.get(
+  "/admin/startups",
+  verifyJWT,
+  verifyAdmin,
+  async (req, res) => {
+    const result = await startupsCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(result);
+  }
+);
     // STARTUPS
     // ==================================================
 
@@ -586,8 +599,11 @@ app.get(
     const totalUsers =
       await usersCollection.countDocuments();
 
+    // ONLY APPROVED STARTUPS
     const totalStartups =
-      await startupsCollection.countDocuments();
+      await startupsCollection.countDocuments({
+        status: "Approved",
+      });
 
     const totalOpportunities =
       await opportunitiesCollection.countDocuments();
@@ -595,12 +611,10 @@ app.get(
     const payments =
       await paymentsCollection.find().toArray();
 
-    const totalRevenue =
-      payments.reduce(
-        (sum, payment) =>
-          sum + Number(payment.amount || 0),
-        0
-      );
+    const totalRevenue = payments.reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0
+    );
 
     res.send({
       totalUsers,
@@ -609,8 +623,7 @@ app.get(
       totalRevenue,
     });
   }
-);
-// ==================================================
+);// ==================================================
 // TRANSACTIONS
 // ==================================================
 
