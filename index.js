@@ -402,19 +402,15 @@ app.post("/opportunities", verifyJWT, async (req, res) => {
       res.send(result);
     });
 
-    app.get("/my-applications/:email", verifyJWT, async (req, res) => {
-      const result = await applicationsCollection
-        .find({
-          applicant_email: req.params.email,
-        })
-        .sort({
-          applied_at: -1,
-        })
-        .toArray();
+app.get("/my-applications/:email", async (req, res) => {
+  const result = await applicationsCollection
+    .find({
+      applicant_email: req.params.email,
+    })
+    .toArray();
 
-      res.send(result);
-    });
-
+  res.send(result);
+});
     app.get("/applications", verifyJWT, async (req, res) => {
       const result = await applicationsCollection
         .find()
@@ -456,7 +452,34 @@ app.post("/opportunities", verifyJWT, async (req, res) => {
       res.send(result);
     });
  
+//hfhjfgjhfgvjj
+app.get(
+  "/founder-applications/:email",
+  verifyJWT,
+  async (req, res) => {
 
+    const founderEmail = req.params.email;
+
+    const opportunities =
+      await opportunitiesCollection
+        .find({ founderEmail })
+        .toArray();
+
+    const opportunityIds =
+      opportunities.map((o) => o._id.toString());
+
+    const applications =
+      await applicationsCollection
+        .find({
+          opportunity_id: {
+            $in: opportunityIds,
+          },
+        })
+        .toArray();
+
+    res.send(applications);
+  }
+);
     // ==================================================
 // STRIPE PAYMENT
 // ==================================================
