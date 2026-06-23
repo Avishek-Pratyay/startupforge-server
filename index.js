@@ -416,14 +416,63 @@ app.post("/opportunities", verifyJWT, async (req, res) => {
     });
 
 app.get("/my-applications/:email", async (req, res) => {
-  const result = await applicationsCollection
-    .find({
-      applicant_email: req.params.email,
-    })
-    .toArray();
+try {
+const applications = await applicationsCollection
+.find({
+applicant_email: req.params.email,
+})
+.toArray();
 
-  res.send(result);
+
+const enrichedApplications = await Promise.all(
+  applications.map(async (app) => {
+    const opportunity =
+      await opportunitiesCollection.findOne({
+        _id: new ObjectId(app.opportunity_id),
+      });
+
+    return {
+      ...app,
+
+      role_title:
+        opportunity?.role_title || "Opportunity",
+
+      industry:
+        opportunity?.industry || "N/A",
+
+      work_type:
+        opportunity?.work_type || "N/A",
+
+      deadline:
+        opportunity?.deadline || "N/A",
+
+      required_skills:
+        opportunity?.required_skills || [],
+
+      startup_name:
+        opportunity?.startup_name || "Startup",
+
+      founder_email:
+        opportunity?.founder_email || "N/A",
+    };
+  })
+);
+
+res.send(enrichedApplications);
+
+
+} catch (error) {
+console.log(error);
+
+
+res.status(500).send({
+  message: "Failed to fetch applications",
 });
+
+
+}
+});
+
     app.get("/applications", verifyJWT, async (req, res) => {
       const result = await applicationsCollection
         .find()
