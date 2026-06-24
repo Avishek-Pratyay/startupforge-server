@@ -621,15 +621,39 @@ app.post(
     res.send(result);
   }
 );
-app.get(
+app.post(
   "/payments",
   verifyJWT,
   async (req, res) => {
+    const payment = req.body;
+
+    const existingPayment =
+      await paymentsCollection.findOne({
+        user_email: payment.user_email,
+      });
+
+    if (existingPayment) {
+      return res.send({
+        message: "Already premium",
+      });
+    }
+
     const result =
-      await paymentsCollection
-        .find()
-        .sort({ paid_at: -1 })
-        .toArray();
+      await paymentsCollection.insertOne({
+        ...payment,
+        paid_at: new Date(),
+      });
+
+    await usersCollection.updateOne(
+      {
+        email: payment.user_email,
+      },
+      {
+        $set: {
+          isPremiumFounder: true,
+        },
+      }
+    );
 
     res.send(result);
   }
