@@ -17,7 +17,7 @@ const app = express();
 app.use(
   cors({
     origin: ["http://localhost:5173",
-    process.env.CLIENT_URL],
+     "https://startupforge-client-six.vercel.app",],
     credentials: true,
   })
 );
