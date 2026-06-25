@@ -132,7 +132,17 @@ app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
 
       const user = await usersCollection.findOne({ email });
 
-      if (user.isBlocked) {
+      if (!user) {
+  return res.status(404).send({
+    message: "User not found",
+  });
+}
+
+if (user.isBlocked) {
+  return res.status(403).send({
+    message: "User is blocked by admin",
+  });
+} {
   return res.status(403).send({
     message: "User is blocked by admin",
   });
@@ -157,8 +167,8 @@ app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
       res
         .cookie("token", token, {
           httpOnly: true,
-          secure: false,
-          sameSite: "strict",
+          secure: true,
+          sameSite: "none",
         })
         .send({
           success: true,
@@ -166,7 +176,13 @@ app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
     });
 
     app.post("/logout", (req, res) => {
-      res.clearCookie("token").send({
+      res.clearCookie("token",
+        {
+          httpOnly:true,
+          secure:true,
+          sameSite:"none",
+        });
+      res.send({
         success: true,
       });
     });
