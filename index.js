@@ -127,53 +127,44 @@ app.patch("/users/profile/:email", verifyJWT, async (req, res) => {
     // JWT AUTH
     // ==================================================
 
-    app.post("/jwt", async (req, res) => {
-      const { email } = req.body;
+ app.post("/jwt", async (req, res) => {
+  const { email } = req.body;
 
-      const user = await usersCollection.findOne({ email });
+  const user = await usersCollection.findOne({ email });
 
-      if (!user) {
-  return res.status(404).send({
-    message: "User not found",
-  });
-}
-
-if (user.isBlocked) {
-  return res.status(403).send({
-    message: "User is blocked by admin",
-  });
-} {
-  return res.status(403).send({
-    message: "User is blocked by admin",
-  });
-}
-      if (!user) {
-        return res.status(404).send({
-          message: "User not found",
-        });
-      }
-
-      const token = jwt.sign(
-        {
-          email: user.email,
-          role: user.role,
-        },
-        process.env.JWT_SECRET,
-        {
-          expiresIn: "7d",
-        }
-      );
-
-      res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-        })
-        .send({
-          success: true,
-        });
+  if (!user) {
+    return res.status(404).send({
+      message: "User not found",
     });
+  }
+
+  if (user.isBlocked) {
+    return res.status(403).send({
+      message: "User is blocked by admin",
+    });
+  }
+
+  const token = jwt.sign(
+    {
+      email: user.email,
+      role: user.role,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: "7d",
+    }
+  );
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+  });
+
+  res.send({
+    success: true,
+  });
+});
 
     app.post("/logout", (req, res) => {
       res.clearCookie("token",
